@@ -31,7 +31,10 @@
 #define HYDRA64_SCENE_ID                     1
 
 #define HYDRA64_GET_CHANS_PAYLOAD_BYTES      4
-#define HYDRA64_SET_LDS_PAYLOAD_BYTES        (4 + HYDRA64_LIVE_DEMO_SCENE_BYTES)
+/* SetC2Attr wrapper for LiveDemoScene is 5 bytes (attr LE + start +
+ * count + elem_len) followed by the 51-byte value. Total payload =
+ * 5 + 51 = 56 = 0x38, matching the captured payload_len byte. */
+#define HYDRA64_SET_LDS_PAYLOAD_BYTES        (5 + HYDRA64_LIVE_DEMO_SCENE_BYTES)
 
 size_t hydra64_build_supported_channels_read(uint8_t count,
                                              uint8_t *out, size_t out_cap);

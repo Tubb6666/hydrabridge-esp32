@@ -8,5 +8,6 @@ void register_crc16_tests(void);
 void register_fsci_builder_tests(void);
 void register_fsci_parser_tests(void);
 void register_channel_model_tests(void);
+void register_hydra64hd_tests(void);
 
 #endif /* HOST_TESTS_ALL_TESTS_H */
