@@ -38,6 +38,7 @@ void app_main(void)
     ESP_ERROR_CHECK(modbus_interface_init());
 
     ESP_ERROR_CHECK(ble_light_client_init());
+    ESP_ERROR_CHECK(ble_light_client_start());
 
     /* MQTT and web UI are optional based on persisted config. */
     ESP_ERROR_CHECK(mqtt_bridge_init());
