@@ -22,4 +22,5 @@ idf_component_register(
         light_registry
         command_queue
         ble_scanner
+        ha_discovery
 )
