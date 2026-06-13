@@ -17,6 +17,7 @@ int main(int argc, char **argv)
     (void)argc; (void)argv;
     UNITY_BEGIN();
     register_smoke_tests();
+    register_event_log_tests();
     /* Future phases append calls here:
      * register_crc16_tests();           (1.1)
      * register_fsci_builder_tests();    (1.2)

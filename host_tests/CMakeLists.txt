@@ -26,16 +26,25 @@ add_compile_options(-Wall -Wextra -Wno-unused-parameter -O0 -g)
 # Collect every tests/test_*.c that has been added so far.
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_*.c")
 
+# Project sources that are pure-C and host-testable. Each Phase adds
+# the .c files it owns to this list. Anything that pulls in esp-idf
+# headers must be #ifdef ESP_PLATFORM-guarded inside the source.
+set(MODULE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/event_log/src/event_log.c
+)
+
 add_executable(host_tests
     runner.c
     ${UNITY_SRC_DIR}/unity.c
     ${TEST_SOURCES}
+    ${MODULE_SOURCES}
 )
 
 target_include_directories(host_tests PRIVATE
     ${UNITY_SRC_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/event_log/include
 )
 
 # Unity config: skip the unity_config.h include (ESP-IDF supplies one only
