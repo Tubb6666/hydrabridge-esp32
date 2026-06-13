@@ -36,6 +36,7 @@ set(MODULE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel_model/src/channel_model.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/hydra64hd_protocol/src/hydra64hd_protocol.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/preset_engine/src/preset_engine.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/light_registry/src/light_registry.c
 )
 
 add_executable(host_tests
@@ -55,6 +56,7 @@ target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel_model/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/hydra64hd_protocol/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/preset_engine/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/light_registry/include
 )
 
 # Unity config: skip the unity_config.h include (ESP-IDF supplies one only

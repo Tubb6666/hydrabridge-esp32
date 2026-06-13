@@ -10,5 +10,6 @@ void register_fsci_parser_tests(void);
 void register_channel_model_tests(void);
 void register_hydra64hd_tests(void);
 void register_preset_engine_tests(void);
+void register_light_registry_tests(void);
 
 #endif /* HOST_TESTS_ALL_TESTS_H */
