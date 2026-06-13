@@ -66,8 +66,12 @@ static int parse_channels(const cJSON *root, ce_request_t *r)
     cJSON_ArrayForEach(child, channels) {
         if (r->channel_count >= CHANNEL_COUNT) return -1;
         if (!cJSON_IsNumber(child) || !child->string) return -1;
-        if (!channel_model_by_name(child->string)) return -1;
-        r->channels[r->channel_count].name  = child->string;
+        /* Store the canonical channel_def->name pointer (static const
+         * storage) rather than child->string -- cJSON_Delete frees the
+         * latter while ce_request_t may be used after we return. */
+        const channel_def_t *def = channel_model_by_name(child->string);
+        if (!def) return -1;
+        r->channels[r->channel_count].name  = def->name;
         r->channels[r->channel_count].value = (uint16_t)child->valuedouble;
         ++r->channel_count;
     }

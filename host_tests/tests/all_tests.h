@@ -14,5 +14,6 @@ void register_light_registry_tests(void);
 void register_command_queue_tests(void);
 void register_command_engine_tests(void);
 void register_modbus_interface_tests(void);
+void register_mqtt_parser_tests(void);
 
 #endif /* HOST_TESTS_ALL_TESTS_H */

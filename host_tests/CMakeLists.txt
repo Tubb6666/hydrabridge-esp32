@@ -40,6 +40,8 @@ set(MODULE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_queue/src/command_queue.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_engine/src/command_engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/modbus_interface/src/modbus_interface.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/mqtt_bridge/src/mqtt_bridge.c
+    $ENV{IDF_PATH}/components/json/cJSON/cJSON.c
 )
 
 add_executable(host_tests
@@ -63,6 +65,8 @@ target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_queue/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_engine/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/modbus_interface/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/mqtt_bridge/include
+    $ENV{IDF_PATH}/components/json/cJSON
 )
 
 # Unity config: skip the unity_config.h include (ESP-IDF supplies one only
