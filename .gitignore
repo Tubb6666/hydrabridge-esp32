@@ -19,6 +19,9 @@ sdkconfig.*.old
 *.swo
 .DS_Store
 
+# Local Claude Code state (loop scheduler locks, transcripts, etc.)
+/.claude/
+
 # Python / tooling
 __pycache__/
 *.py[cod]
