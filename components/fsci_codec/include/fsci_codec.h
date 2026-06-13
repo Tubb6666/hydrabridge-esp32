@@ -46,6 +46,24 @@
  * Pure C, no esp-idf dependency. Host-testable. */
 uint16_t fsci_crc16(const uint8_t *data, size_t len);
 
+/* Build a complete FSCI frame in `out`. Returns 0 on success or -1 if
+ * `out_cap` is too small. On success, *out_len_written is set to the
+ * total frame length:
+ *
+ *   FSCI_HEADER_LEN_BYTES + payload_len + FSCI_TRAILER_LEN_BYTES
+ *
+ * payload may be NULL when payload_len == 0. The reserved-flags field
+ * is always written as 0x0000 -- the v1 protocol does not use the
+ * group-id / no-respond bits documented in the Java decomp. */
+int fsci_build(uint8_t op_group,
+               uint8_t op_code,
+               uint16_t msg_id,
+               const uint8_t *payload,
+               size_t payload_len,
+               uint8_t *out,
+               size_t out_cap,
+               size_t *out_len_written);
+
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 esp_err_t fsci_codec_init(void);
