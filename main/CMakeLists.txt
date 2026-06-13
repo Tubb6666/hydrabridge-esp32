@@ -20,4 +20,5 @@ idf_component_register(
         ota_update
         preset_engine
         light_registry
+        command_queue
 )
