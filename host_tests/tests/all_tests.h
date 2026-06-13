@@ -6,5 +6,6 @@ void register_event_log_tests(void);
 void register_config_store_tests(void);
 void register_crc16_tests(void);
 void register_fsci_builder_tests(void);
+void register_fsci_parser_tests(void);
 
 #endif /* HOST_TESTS_ALL_TESTS_H */

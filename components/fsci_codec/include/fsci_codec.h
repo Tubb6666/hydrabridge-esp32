@@ -64,6 +64,54 @@ int fsci_build(uint8_t op_group,
                size_t out_cap,
                size_t *out_len_written);
 
+/* Parsed view over a complete FSCI frame. payload points into the
+ * source buffer -- caller owns the lifetime. */
+typedef struct {
+    uint8_t        op_group;
+    uint8_t        op_code;
+    uint16_t       msg_id;
+    const uint8_t *payload;
+    size_t         payload_len;
+} fsci_frame_t;
+
+typedef enum {
+    FSCI_PARSE_OK             = 0,
+    FSCI_PARSE_BUF_TOO_SHORT  = -1,
+    FSCI_PARSE_BAD_START      = -2,
+    FSCI_PARSE_LEN_MISMATCH   = -3,
+    FSCI_PARSE_BAD_CRC        = -4,
+    FSCI_PARSE_NULL_ARG       = -5,
+} fsci_parse_result_t;
+
+/* Parse a complete FSCI frame. Validates start marker, declared
+ * payload length matches the buffer, and CRC. On success the fields in
+ * *out are populated and out->payload points into buf. */
+int fsci_parse(const uint8_t *buf, size_t len, fsci_frame_t *out);
+
+/* Reassembly buffer for fragmented BLE notifications. RX Data
+ * fragments are appended; RX Final triggers a parse attempt. */
+#define FSCI_REASSEMBLY_CAP 512
+typedef struct {
+    uint8_t buf[FSCI_REASSEMBLY_CAP];
+    size_t  len;
+} fsci_reassembly_t;
+
+void fsci_reassembly_reset(fsci_reassembly_t *r);
+
+/* Append a non-final RX Data fragment. Returns 0 on success or
+ * FSCI_PARSE_BUF_TOO_SHORT (-1) if the buffer would overflow (also
+ * resets the buffer in that case to avoid a partial frame jamming the
+ * stream). */
+int fsci_reassembly_append(fsci_reassembly_t *r, const uint8_t *data, size_t len);
+
+/* Append the final RX Final fragment, then parse the accumulated
+ * buffer. Resets the buffer afterwards regardless of parse outcome --
+ * a bad frame should not block the next message. Returns
+ * fsci_parse_result_t. */
+int fsci_reassembly_finalize(fsci_reassembly_t *r,
+                             const uint8_t *data, size_t len,
+                             fsci_frame_t *out);
+
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 esp_err_t fsci_codec_init(void);

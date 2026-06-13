@@ -21,6 +21,7 @@ int main(int argc, char **argv)
     register_config_store_tests();
     register_crc16_tests();
     register_fsci_builder_tests();
+    register_fsci_parser_tests();
     /* Future phases append calls here:
      * register_crc16_tests();           (1.1)
      * register_fsci_builder_tests();    (1.2)
