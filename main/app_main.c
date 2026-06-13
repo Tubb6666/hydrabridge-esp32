@@ -23,7 +23,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Hydra 64HD controller starting");
 
-    ESP_ERROR_CHECK(event_log_init());
+    event_log_init();
     ESP_ERROR_CHECK(config_store_init());
     ESP_ERROR_CHECK(command_engine_init());
 
