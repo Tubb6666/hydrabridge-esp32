@@ -27,3 +27,10 @@ CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
 # ---- OTA rollback on boot failure ----
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# ---- WiFi/BLE coex on shared 2.4 GHz radio ----
+# Pin WiFi task to core 1 so BLE (controller+host on core 0) gets full
+# core 0 for radio scheduling. Espressif official recommendation.
+CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=y
+CONFIG_BT_CTRL_PINNED_TO_CORE_0=y

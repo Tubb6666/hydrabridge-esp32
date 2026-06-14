@@ -27,6 +27,7 @@
 #include "fsci_codec.h"
 #include "hydra64hd_protocol.h"
 #include "light_registry.h"
+#include "wifi_station.h"
 
 static const char *TAG = "ble_light_client";
 
@@ -149,12 +150,21 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
                 s_conn.conn_handle = event->connect.conn_handle;
-                ESP_LOGI(TAG, "connected, handle=%d", s_conn.conn_handle);
-                set_state(BLC_STATE_DISCOVERING);
-                ble_gattc_disc_svc_by_uuid(s_conn.conn_handle, &SVC_UUID.u,
-                                           on_gatt_svc_disc, NULL);
+                ESP_LOGI(TAG, "connected, handle=%d; requesting MTU", s_conn.conn_handle);
+                /* Hydra (NXP MKW41Z C2 stack) drops the link if service
+                 * discovery starts before MTU exchange completes. Mobius
+                 * always requests MTU first and only starts discovery in
+                 * onMtuChanged. */
+                int rc = ble_gattc_exchange_mtu(s_conn.conn_handle, NULL, NULL);
+                if (rc != 0) {
+                    ESP_LOGW(TAG, "mtu_exchange start failed: %d; discovering anyway", rc);
+                    set_state(BLC_STATE_DISCOVERING);
+                    ble_gattc_disc_svc_by_uuid(s_conn.conn_handle, &SVC_UUID.u,
+                                               on_gatt_svc_disc, NULL);
+                }
             } else {
                 ESP_LOGW(TAG, "connect failed: %d", event->connect.status);
+                hydra_wifi_resume();
                 set_state(BLC_STATE_BACKOFF);
             }
             return 0;
@@ -164,12 +174,18 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
             s_conn.conn_handle = 0;
             s_conn.attr_rx_data = s_conn.attr_rx_final = 0;
             s_conn.attr_tx_data = s_conn.attr_tx_final = 0;
+            hydra_wifi_resume();
             set_state(BLC_STATE_IDLE);
             return 0;
 
         case BLE_GAP_EVENT_MTU:
             s_conn.mtu = event->mtu.value;
-            ESP_LOGI(TAG, "mtu negotiated: %u", s_conn.mtu);
+            ESP_LOGI(TAG, "mtu=%u; starting service discovery", s_conn.mtu);
+            if (s_conn.state == BLC_STATE_CONNECTING) {
+                set_state(BLC_STATE_DISCOVERING);
+                ble_gattc_disc_svc_by_uuid(s_conn.conn_handle, &SVC_UUID.u,
+                                           on_gatt_svc_disc, NULL);
+            }
             return 0;
 
         case BLE_GAP_EVENT_NOTIFY_RX: {
@@ -189,17 +205,27 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
     }
 }
 
+static bool s_chr_disc_started = false;
+
 static int on_gatt_svc_disc(uint16_t conn_handle,
                             const struct ble_gatt_error *error,
                             const struct ble_gatt_svc *svc, void *arg)
 {
     (void)arg;
     if (error->status == BLE_HS_EDONE) {
-        ble_gattc_disc_all_chrs(conn_handle, 1, 0xFFFF, on_gatt_chr_disc, NULL);
+        /* No-op if a per-service callback already kicked off characteristic
+         * discovery. Firing a second discover-all here exhausts
+         * CONFIG_BT_NIMBLE_GATT_MAX_PROCS and breaks the subsequent CCCD
+         * write. If our service was never found, terminate. */
+        if (s_chr_disc_started) return 0;
+        ESP_LOGE(TAG, "service not found on peer; terminating");
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        set_state(BLC_STATE_ERROR);
         return 0;
     }
     if (error->status != 0 || !svc) return 0;
     ESP_LOGI(TAG, "found service handle=%d-%d", svc->start_handle, svc->end_handle);
+    s_chr_disc_started = true;
     ble_gattc_disc_all_chrs(conn_handle, svc->start_handle, svc->end_handle,
                             on_gatt_chr_disc, NULL);
     return 0;
@@ -318,10 +344,44 @@ static void try_connect_to(const registered_light_t *light)
         peer.val[i] = light->ble_addr[BLE_ADDR_BYTES - 1 - i];
     }
     strncpy(s_conn.light_id, light->light_id, LIGHT_ID_LEN - 1);
+    s_chr_disc_started = false;
     set_state(BLC_STATE_CONNECTING);
-    int rc = ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &peer,
-                             CONNECT_TIMEOUT_MS, NULL,
-                             gap_event_cb, NULL);
+
+    /* ESP32-S3 shares one 2.4 GHz radio between WiFi and BLE. Even with
+     * esp_coex_preference_set(PREFER_BT), WiFi beacon listening at DTIM=1
+     * APs blackholes the narrow CONNECT_IND window. Stop WiFi while BLE
+     * owns the radio; we'll restart it on BLE disconnect. */
+    hydra_wifi_pause();
+    /* Settle delay so the WiFi MAC fully releases the PHY before the
+     * BLE controller starts initiating. esp_wifi_stop returns before
+     * the radio is actually idle. */
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    uint8_t own_addr_type;
+    int rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "infer_auto failed: %d; falling back to PUBLIC", rc);
+        own_addr_type = BLE_OWN_ADDR_PUBLIC;
+    }
+    ESP_LOGI(TAG, "connect: own_addr_type=%u peer_type=%u", own_addr_type, peer.type);
+
+    /* Mobius requests CONNECTION_PRIORITY_HIGH (≈11–15 ms interval, 0
+     * slave latency, 5 s supervision). The Hydra is known to drop links
+     * that use slower defaults. Match Android's HIGH priority profile. */
+    struct ble_gap_conn_params cp = {
+        .scan_itvl           = 0x0010,
+        .scan_window         = 0x0010,
+        .itvl_min            = 0x0009,
+        .itvl_max            = 0x000C,
+        .latency             = 0,
+        .supervision_timeout = 0x01F4,
+        .min_ce_len          = 0,
+        .max_ce_len          = 0,
+    };
+
+    rc = ble_gap_connect(own_addr_type, &peer,
+                         CONNECT_TIMEOUT_MS, &cp,
+                         gap_event_cb, NULL);
     if (rc != 0) {
         ESP_LOGW(TAG, "ble_gap_connect failed: %d", rc);
         set_state(BLC_STATE_BACKOFF);

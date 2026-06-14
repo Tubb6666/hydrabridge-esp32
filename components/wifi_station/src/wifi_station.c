@@ -39,6 +39,7 @@ static const char *TAG = "wifi_station";
 
 static bool         s_started   = false;
 static bool         s_connected = false;
+static bool         s_paused    = false;
 static esp_netif_t *s_netif     = NULL;
 
 bool hydra_wifi_is_connected(void) { return s_connected; }
@@ -54,6 +55,10 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
             break;
         case WIFI_EVENT_STA_DISCONNECTED:
             s_connected = false;
+            if (s_paused) {
+                ESP_LOGI(TAG, "disconnected (paused for BLE)");
+                break;
+            }
             ESP_LOGW(TAG, "disconnected; retry in %d ms", RECONNECT_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(RECONNECT_DELAY_MS));
             esp_wifi_connect();
@@ -124,9 +129,47 @@ esp_err_t hydra_wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    /* WiFi power-save mode time-slices the shared 2.4 GHz radio. On
+     * ESP32-S3 with WiFi+BLE coex, PS transitions can blackhole BLE
+     * CONNECT_REQ packets, manifesting as 8-second connect timeouts.
+     * Pinning PS off lets BLE always win the radio when it asks. */
+    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (ps_err != ESP_OK) {
+        ESP_LOGW(TAG, "wifi_set_ps NONE failed: 0x%x", ps_err);
+    }
+
     mdns_bring_up();
 
     s_started = true;
+    return ESP_OK;
+}
+
+esp_err_t hydra_wifi_pause(void)
+{
+    if (!s_started) return ESP_OK;
+    s_paused = true;
+    s_connected = false;
+    /* Full stop, not just disconnect. The driver's background scan
+     * activity contends for the shared 2.4 GHz radio enough to
+     * blackhole BLE connect windows even when disassociated. */
+    esp_err_t err = esp_wifi_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT) {
+        ESP_LOGW(TAG, "wifi_stop failed: 0x%x", err);
+    }
+    return err;
+}
+
+esp_err_t hydra_wifi_resume(void)
+{
+    if (!s_started) return ESP_OK;
+    s_paused = false;
+    esp_err_t err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "wifi_start failed: 0x%x", err);
+        return err;
+    }
+    /* esp_wifi_start triggers WIFI_EVENT_STA_START → handler calls
+     * esp_wifi_connect itself, so no explicit connect call needed. */
     return ESP_OK;
 }
 

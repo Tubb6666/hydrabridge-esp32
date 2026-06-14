@@ -24,4 +24,5 @@ idf_component_register(
         ble_scanner
         ha_discovery
         wifi_station
+        esp_coex
 )

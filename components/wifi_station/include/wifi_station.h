@@ -13,6 +13,12 @@
  * Idempotent: subsequent _start calls are no-ops. */
 esp_err_t hydra_wifi_start(void);
 bool      hydra_wifi_is_connected(void);
+
+/* Pause/resume the WiFi station association without tearing down the
+ * netif. Use around BLE central operations on ESP32-S3 where the shared
+ * 2.4 GHz radio cannot service both reliably. */
+esp_err_t hydra_wifi_pause(void);
+esp_err_t hydra_wifi_resume(void);
 #endif
 
 #endif /* HYDRA_WIFI_STATION_H */
