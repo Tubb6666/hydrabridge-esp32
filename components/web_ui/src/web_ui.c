@@ -315,6 +315,10 @@ static esp_err_t post_light_command(httpd_req_t *req)
     p += strlen("/api/lights/");
     const char *slash = strchr(p, '/');
     if (!slash) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing light_id"); return ESP_FAIL; }
+    if (strcmp(slash, "/command") != 0) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "unknown light subpath");
+        return ESP_FAIL;
+    }
     char light_id[LIGHT_ID_LEN];
     size_t id_len = slash - p;
     if (id_len >= LIGHT_ID_LEN) id_len = LIGHT_ID_LEN - 1;
@@ -420,7 +424,7 @@ esp_err_t web_ui_init(void)
     static const httpd_uri_t r_scan_results  = { .uri = "/api/scan/results",     .method = HTTP_GET,  .handler = get_scan_results };
     static const httpd_uri_t r_lights_get    = { .uri = "/api/lights",           .method = HTTP_GET,  .handler = get_lights };
     static const httpd_uri_t r_lights_post   = { .uri = "/api/lights",           .method = HTTP_POST, .handler = post_lights };
-    static const httpd_uri_t r_light_cmd     = { .uri = "/api/lights/*/command", .method = HTTP_POST, .handler = post_light_command };
+    static const httpd_uri_t r_light_cmd     = { .uri = "/api/lights/*",         .method = HTTP_POST, .handler = post_light_command };
     static const httpd_uri_t r_logs          = { .uri = "/api/logs",             .method = HTTP_GET,  .handler = get_logs };
     static const httpd_uri_t r_ota           = { .uri = "/api/ota",              .method = HTTP_POST, .handler = post_ota };
 
