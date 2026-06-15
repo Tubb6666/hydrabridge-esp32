@@ -34,7 +34,9 @@ Features include:
 
 This ESP32-S3 controller talks to **AquaIllumination Hydra®** lights directly over BLE using the reverse-engineered myAI / Mobius® protocol, with MQTT integration and a Modbus RTU slave register map for PLC integration.
 
-**Target hardware**: Waveshare Industrial ESP32-S3 Control Board with onboard RS485 + CAN. Any ESP32-S3 dev board works for the BLE/MQTT/web paths; the RS485 path needs a wired-up transceiver.
+**Target hardware**: This project is developed and release-tested for the [Waveshare ESP32-S3-RS485-CAN](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN#Onboard_Resources). That board provides the expected ESP32-S3 MCU, 2.4 GHz WiFi/BLE, 16MB flash, USB-C flashing/debug, wide-range screw-terminal power input, and onboard isolated RS485 hardware.
+
+Other ESP32-S3 boards can run HydraBridge ESP32, but may need changes before flashing: confirm flash size and partition layout, wire or add an RS485 transceiver if you need Modbus, update RS485 GPIOs in Settings or defaults, and verify USB/serial flashing behavior for that board. BLE, WiFi, MQTT, and the web UI do not require the Waveshare RS485/CAN hardware.
 
 ## What works today
 

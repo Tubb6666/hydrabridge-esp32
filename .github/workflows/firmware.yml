@@ -71,7 +71,7 @@ jobs:
           PY
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hydrabridge-esp32-firmware-${{ github.run_number }}
           path: |

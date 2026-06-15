@@ -1,10 +1,15 @@
 # HydraBridge ESP32 Quickstart
 
-This guide is for flashing a Waveshare ESP32-S3 controller and getting it onto WiFi without compiling the firmware.
+This guide is for flashing the supported Waveshare ESP32-S3 controller and getting it onto WiFi without compiling the firmware.
+
+The prebuilt release firmware is developed and tested for the [Waveshare ESP32-S3-RS485-CAN](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN#Onboard_Resources). That board has the expected ESP32-S3, 2.4 GHz WiFi/BLE, 16MB flash, USB-C flashing/debug, wide-range power input, and onboard isolated RS485 interface.
+
+Other ESP32-S3 boards can run HydraBridge ESP32, but they may need source-level or settings changes before use: flash size and partition layout, RS485 transceiver wiring, RS485 GPIO assignments, and board-specific USB/serial flashing behavior. For non-Waveshare boards, build from source unless you have confirmed the release binary matches your board.
 
 ## What you need
 
-- Waveshare Industrial ESP32-S3 controller, or another ESP32-S3 board
+- Waveshare ESP32-S3-RS485-CAN controller
+- Optional: another ESP32-S3 board, if you are prepared to adjust pins, flash layout, and RS485 hardware
 - USB-C data cable
 - A 2.4 GHz WiFi network
 - A computer running Linux, macOS, or Windows
