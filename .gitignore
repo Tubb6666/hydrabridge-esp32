@@ -19,10 +19,12 @@ sdkconfig.*.old
 *.swo
 .DS_Store
 
-# Local Claude Code state (loop scheduler locks, transcripts, etc.)
+# Local AI agent state (locks, transcripts, cached context, etc.)
 /.claude/
+/.codex/
+AGENTS.md
 
-# WiFi credentials (use main/wifi_credentials.h.example as a template)
+# Legacy/local WiFi credentials header; WiFi is configured from the web UI now.
 /main/wifi_credentials.h
 
 # Python / tooling
@@ -36,9 +38,8 @@ venv/
 *.log
 *.btsnoop
 
-# Decompiled APK references are useful locally but too large/noisy for git
-/reference/decompiled/
-*decompiled*/
+# Local reverse-engineering reference material is useful locally but not for git
+/reference/
 
 # Firmware artifacts
 *.bin

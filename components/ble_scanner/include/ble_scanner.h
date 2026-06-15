@@ -25,6 +25,8 @@ typedef struct {
     int8_t           rssi;
     char             name[BLE_SCANNER_NAME_MAX];
     myai_manuf_t     manuf;
+    bool             has_hydra_service;  /* set if 128-bit service UUID 01FF0100-... seen in adv (for pairing mode discovery) */
+    bool             has_manuf_data;     /* set if any 0xFF manufacturer specific data was present (even if parse failed) - helps pairing mode */
 } ble_scan_result_t;
 
 int ble_scanner_parse_manuf(const uint8_t *data, size_t len, myai_manuf_t *out);

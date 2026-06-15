@@ -21,7 +21,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "channel_model.h"
 #include "command_queue.h"
 #include "event_log.h"
 #include "fsci_codec.h"
@@ -74,8 +73,48 @@ static bool          s_started = false;
 static uint16_t      s_msg_id_seq = 0x0050;
 static blc_result_cb_t s_result_cb = NULL;
 static void           *s_result_user = NULL;
+static bool            s_auto_connect_pending = true;
+static bool            s_intentional_disconnect = false;
 
 static uint64_t now_ms(void) { return (uint64_t)esp_log_timestamp(); }
+
+static const char *gap_status_name(uint8_t status)
+{
+    switch (status) {
+        case 0x00: return "success";
+        case BLE_ERR_CONN_SPVN_TMO: return "supervision_timeout";
+        case BLE_ERR_CONN_REJ_RESOURCES: return "conn_rejected_resources";
+        case BLE_ERR_CONN_REJ_SECURITY: return "conn_rejected_security";
+        case BLE_ERR_CONN_REJ_BD_ADDR: return "conn_rejected_bd_addr";
+        case BLE_ERR_REM_USER_CONN_TERM: return "remote_user_terminated";
+        case BLE_ERR_CONN_TERM_LOCAL: return "local_terminated";
+        case BLE_ERR_CTLR_BUSY: return "controller_busy";
+        case BLE_ERR_CONN_ESTABLISHMENT: return "connection_establishment_failed";
+        case BLE_ERR_MAC_CONN_FAIL: return "mac_connection_failed";
+        default: return "unknown";
+    }
+}
+
+static bool peer_type_to_nimble(ble_addr_type_t type, uint8_t *out)
+{
+    if (!out) return false;
+    switch (type) {
+        case BLE_ADDR_PUBLIC:
+            *out = BLE_ADDR_PUBLIC;
+            return true;
+        case BLE_ADDR_RANDOM:
+            *out = BLE_ADDR_RANDOM;
+            return true;
+        case BLE_ADDR_PUBLIC_ID:
+            *out = BLE_ADDR_PUBLIC_ID;
+            return true;
+        case BLE_ADDR_RANDOM_ID:
+            *out = BLE_ADDR_RANDOM_ID;
+            return true;
+        default:
+            return false;
+    }
+}
 
 static void set_state(blc_state_t s)
 {
@@ -163,7 +202,14 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
                                                on_gatt_svc_disc, NULL);
                 }
             } else {
-                ESP_LOGW(TAG, "connect failed: %d", event->connect.status);
+                char msg[96];
+                snprintf(msg, sizeof msg, "status=%u/0x%02x %s",
+                         (unsigned)event->connect.status,
+                         (unsigned)event->connect.status,
+                         gap_status_name((uint8_t)event->connect.status));
+                ESP_LOGW(TAG, "connect failed: %s", msg);
+                event_log_emit(EVENT_LEVEL_WARN, "ble_connect_fail",
+                               s_conn.light_id, "", msg);
                 hydra_wifi_resume();
                 set_state(BLC_STATE_BACKOFF);
             }
@@ -174,6 +220,10 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
             s_conn.conn_handle = 0;
             s_conn.attr_rx_data = s_conn.attr_rx_final = 0;
             s_conn.attr_tx_data = s_conn.attr_tx_final = 0;
+            if (!s_intentional_disconnect && light_registry_count() > 0) {
+                s_auto_connect_pending = true;
+            }
+            s_intentional_disconnect = false;
             hydra_wifi_resume();
             set_state(BLC_STATE_IDLE);
             return 0;
@@ -280,6 +330,7 @@ static int on_gatt_subscribe(uint16_t conn_handle,
         return 0;
     }
     rx_data_subscribed = false;
+    s_auto_connect_pending = false;
     set_state(BLC_STATE_READY);
     ESP_LOGI(TAG, "ready for writes");
     return 0;
@@ -335,27 +386,51 @@ static void issue_write(const pending_command_t *cmd)
     set_state(BLC_STATE_WAITING_CONFIRM);
 }
 
-static void try_connect_to(const registered_light_t *light)
+void try_connect_to(const registered_light_t *light, bool do_prime)
 {
     ble_addr_t peer = {0};
-    peer.type = (light->ble_addr_type == BLE_ADDR_RANDOM)
-        ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
-    for (int i = 0; i < BLE_ADDR_BYTES; ++i) {
-        peer.val[i] = light->ble_addr[BLE_ADDR_BYTES - 1 - i];
+    if (!light || !peer_type_to_nimble(light->ble_addr_type, &peer.type)) {
+        ESP_LOGW(TAG, "invalid peer address type");
+        set_state(BLC_STATE_BACKOFF);
+        return;
     }
+    hydra_ble_addr_to_nimble(peer.val, light->ble_addr);
     strncpy(s_conn.light_id, light->light_id, LIGHT_ID_LEN - 1);
     s_chr_disc_started = false;
     set_state(BLC_STATE_CONNECTING);
 
-    /* ESP32-S3 shares one 2.4 GHz radio between WiFi and BLE. Even with
-     * esp_coex_preference_set(PREFER_BT), WiFi beacon listening at DTIM=1
-     * APs blackholes the narrow CONNECT_IND window. Stop WiFi while BLE
-     * owns the radio; we'll restart it on BLE disconnect. */
-    hydra_wifi_pause();
-    /* Settle delay so the WiFi MAC fully releases the PHY before the
-     * BLE controller starts initiating. esp_wifi_stop returns before
-     * the radio is actually idle. */
-    vTaskDelay(pdMS_TO_TICKS(500));
+    if (do_prime) {
+        /* === WiFi + BLE Central coexistence on ESP32-S3 (shared 2.4 GHz radio) ===
+         * We no longer call hydra_wifi_pause() / esp_wifi_stop() around commands.
+         * WiFi (STA + MQTT + mDNS) stays up and active.
+         *
+         * Coexistence relies on the combination of:
+         *   - esp_coex_preference_set(ESP_COEX_PREFER_BT) early in app_main
+         *   - Core pinning (WiFi on core 1, NimBLE+controller on core 0) via sdkconfig.defaults
+         *   - Controller resources (higher max_act, scan dupe cache, flow control) from Phase 1
+         *   - *Reduced BLE radio duty cycle* in the GAP parameters below (the key app-level knob)
+         *
+         * The short low-duty active "prime" scan is kept (but heavily duty-cycled and shortened)
+         * because traces showed the Hydra light requires recent SCAN_REQ traffic from the
+         * initiator's address before it will accept a subsequent CONNECT_IND.
+         * NimBLE's ble_gap_connect does not send the priming SCAN_REQs that BlueZ does.
+         */
+        /* For pairing lights (or hard-to-connect ones), use high-duty prime to send lots of
+         * SCAN_REQ traffic quickly (the light requires recent SCAN_REQ from our address).
+         * Short duration so WiFi impact is minimal. */
+        struct ble_gap_disc_params dp = {
+            .itvl              = 0x0010,   /* ~10 ms interval */
+            .window            = 0x0010,   /* ~10 ms window  => ~100% duty during prime */
+            .filter_policy     = BLE_HCI_SCAN_FILT_NO_WL,
+            .limited           = 0,
+            .passive           = 0,        /* active scan: send SCAN_REQ to "prime" the light */
+            .filter_duplicates = 0,
+        };
+        ble_gap_disc(BLE_OWN_ADDR_PUBLIC, 1000, &dp, NULL, NULL);  /* aggressive prime for pairing */
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        ble_gap_disc_cancel();
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 
     uint8_t own_addr_type;
     int rc = ble_hs_id_infer_auto(0, &own_addr_type);
@@ -365,16 +440,18 @@ static void try_connect_to(const registered_light_t *light)
     }
     ESP_LOGI(TAG, "connect: own_addr_type=%u peer_type=%u", own_addr_type, peer.type);
 
-    /* Mobius requests CONNECTION_PRIORITY_HIGH (≈11–15 ms interval, 0
-     * slave latency, 5 s supervision). The Hydra is known to drop links
-     * that use slower defaults. Match Android's HIGH priority profile. */
+    /* Coex-tuned LE Extended Create Connection (still uses CSA#2 via EXT_ADV).
+     * Lower scan duty + relaxed connection interval leaves airtime for WiFi
+     * beacons / DTIM / MQTT while keeping usable command latency for lights.
+     * Supervision timeout increased for tolerance to transient contention.
+     */
     struct ble_gap_conn_params cp = {
-        .scan_itvl           = 0x0010,
-        .scan_window         = 0x0010,
-        .itvl_min            = 0x0009,
-        .itvl_max            = 0x000C,
+        .scan_itvl           = 0x00A0,   /* ~100 ms scan interval for connect initiation */
+        .scan_window         = 0x0040,   /* ~40 ms window */
+        .itvl_min            = 0x0030,   /* 60 ms (0x30 * 1.25) min connection interval */
+        .itvl_max            = 0x0050,   /* 100 ms max connection interval */
         .latency             = 0,
-        .supervision_timeout = 0x01F4,
+        .supervision_timeout = 0x0064,   /* 1000 ms (more tolerant under coex) */
         .min_ce_len          = 0,
         .max_ce_len          = 0,
     };
@@ -383,7 +460,11 @@ static void try_connect_to(const registered_light_t *light)
                          CONNECT_TIMEOUT_MS, &cp,
                          gap_event_cb, NULL);
     if (rc != 0) {
-        ESP_LOGW(TAG, "ble_gap_connect failed: %d", rc);
+        char msg[96];
+        snprintf(msg, sizeof msg, "start_rc=%d peer_type=%u", rc, (unsigned)peer.type);
+        ESP_LOGW(TAG, "ble_gap_connect failed: %s", msg);
+        event_log_emit(EVENT_LEVEL_WARN, "ble_connect_start",
+                       s_conn.light_id, "", msg);
         set_state(BLC_STATE_BACKOFF);
     }
 }
@@ -401,16 +482,44 @@ static void worker_tick(void)
         set_state(BLC_STATE_ERROR);
     }
 
-    if (s_conn.state == BLC_STATE_READY &&
-        t - s_conn.last_activity_ms > IDLE_DISCONNECT_MS) {
-        ESP_LOGI(TAG, "idle disconnect for %s", s_conn.light_id);
-        ble_gap_terminate(s_conn.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-        set_state(BLC_STATE_DISCONNECTING);
-        return;
+    if (s_conn.state == BLC_STATE_READY) {
+        /* If the light we are connected to (or were) has been removed from the registry
+         * (e.g. via web UI delete), disconnect promptly so we return to IDLE and allow
+         * scans or commands for other lights. Without this, we stay in READY until the
+         * idle timer fires (30s), blocking /api/scan with "ble busy". */
+        const registered_light_t *cur = light_registry_get(s_conn.light_id);
+        if (!cur || !cur->enabled) {
+            ESP_LOGI(TAG, "light %s removed or disabled while in READY, disconnecting now", s_conn.light_id);
+            s_intentional_disconnect = true;
+            s_auto_connect_pending = false;
+            ble_gap_terminate(s_conn.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            set_state(BLC_STATE_DISCONNECTING);
+            return;
+        }
+
+        if (t - s_conn.last_activity_ms > IDLE_DISCONNECT_MS) {
+            ESP_LOGI(TAG, "idle disconnect for %s", s_conn.light_id);
+            s_intentional_disconnect = true;
+            s_auto_connect_pending = false;
+            ble_gap_terminate(s_conn.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            set_state(BLC_STATE_DISCONNECTING);
+            return;
+        }
+
+        if (cmd_queue_depth(s_conn.light_id) > 0) {
+            pending_command_t cmd;
+            if (cmd_queue_pop(s_conn.light_id, &cmd) == 0) {
+                issue_write(&cmd);
+            }
+        }
     }
 
     if (s_conn.state == BLC_STATE_BACKOFF || s_conn.state == BLC_STATE_ERROR) {
-        if (t - s_conn.last_activity_ms > 1000) set_state(BLC_STATE_IDLE);
+        /* Long backoff on repeated connect failures for a dead/unreachable light
+         * (e.g. one that was removed from the phone or is in pairing mode).
+         * Prevents the client from spamming "extended discovery + connect" and
+         * DoS'ing the BLE stack (which was blocking user pairing scans). */
+        if (t - s_conn.last_activity_ms > 30000) set_state(BLC_STATE_IDLE);
         return;
     }
 
@@ -418,19 +527,21 @@ static void worker_tick(void)
         for (size_t i = 0; i < light_registry_count(); ++i) {
             const registered_light_t *light = light_registry_at(i);
             if (!light || !light->enabled) continue;
-            if (cmd_queue_depth(light->light_id) == 0) continue;
-            try_connect_to(light);
+            size_t depth = cmd_queue_depth(light->light_id);
+            if (depth == 0 && !s_auto_connect_pending) continue;
+            if (depth == 0) {
+                ESP_LOGI(TAG, "auto reconnecting registered light %s", light->light_id);
+            }
+            try_connect_to(light, true);
             return;
         }
         return;
     }
 
-    if (s_conn.state == BLC_STATE_READY && cmd_queue_depth(s_conn.light_id) > 0) {
-        pending_command_t cmd;
-        if (cmd_queue_pop(s_conn.light_id, &cmd) == 0) {
-            issue_write(&cmd);
-        }
-    }
+    /* Note: the READY queue handling was moved inside the READY block above
+     * (along with the remove/disable check) so that we promptly disconnect
+     * on registry removal and return to IDLE (unblocking scans). The old
+     * separate if is no longer needed. */
 }
 
 static void ble_worker_task(void *arg)
@@ -460,6 +571,8 @@ esp_err_t ble_light_client_init(void)
 {
     memset(&s_conn, 0, sizeof s_conn);
     s_conn.state = BLC_STATE_DISABLED;
+    s_auto_connect_pending = true;
+    s_intentional_disconnect = false;
 
     esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {

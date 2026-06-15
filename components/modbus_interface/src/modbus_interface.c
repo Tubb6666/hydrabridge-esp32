@@ -8,6 +8,7 @@
 #include "channel_model.h"
 #include "command_engine.h"
 #include "command_queue.h"
+#include "config_store.h"
 #include "light_registry.h"
 #include "preset_engine.h"
 
@@ -181,17 +182,72 @@ uint16_t *modbus_store_raw_array(void)
     return g_store;
 }
 
+static void modbus_store_apply_config_mirror(const config_modbus_t *mb, bool running)
+{
+    if (!mb) return;
+    if (mb->enabled) {
+        g_store[HYDRA_MODBUS_REG_CONFIG_FLAGS] |= HYDRA_CF_BIT_MODBUS_ENABLED;
+    } else {
+        g_store[HYDRA_MODBUS_REG_CONFIG_FLAGS] &= (uint16_t)~HYDRA_CF_BIT_MODBUS_ENABLED;
+    }
+    if (mb->master_mode_enabled) {
+        g_store[HYDRA_MODBUS_REG_CONFIG_FLAGS] |= HYDRA_CF_BIT_MODBUS_MASTER_MODE;
+    } else {
+        g_store[HYDRA_MODBUS_REG_CONFIG_FLAGS] &= (uint16_t)~HYDRA_CF_BIT_MODBUS_MASTER_MODE;
+    }
+
+    if (!mb->enabled) {
+        g_store[HYDRA_MODBUS_REG_MODBUS_STATUS] = HYDRA_MODBUS_STATUS_DISABLED;
+    } else {
+        g_store[HYDRA_MODBUS_REG_MODBUS_STATUS] =
+            running ? HYDRA_MODBUS_STATUS_SLAVE_READY : HYDRA_MODBUS_STATUS_ERROR;
+    }
+}
+
+esp_err_t modbus_interface_reconfigure(void)
+{
+    config_modbus_t mb;
+    config_store_load_modbus(&mb);
+
+    esp_err_t err = modbus_slave_driver_stop();
+    if (err != ESP_OK) {
+        g_store[HYDRA_MODBUS_REG_MODBUS_STATUS] = HYDRA_MODBUS_STATUS_ERROR;
+        return err;
+    }
+
+    if (mb.enabled) {
+        err = modbus_slave_driver_start();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "modbus_slave_driver_start failed: 0x%x", err);
+            g_store[HYDRA_MODBUS_REG_MODBUS_STATUS] = HYDRA_MODBUS_STATUS_ERROR;
+            modbus_store_apply_config_mirror(&mb, false);
+            return err;
+        }
+    }
+
+    modbus_store_apply_config_mirror(&mb, modbus_slave_driver_is_running());
+    return ESP_OK;
+}
+
 esp_err_t modbus_interface_init(void)
 {
+    config_modbus_t mb;
+    config_store_load_modbus(&mb);
+
     modbus_store_reset();
-    g_store[HYDRA_MODBUS_REG_MODBUS_STATUS] = HYDRA_MODBUS_STATUS_SLAVE_READY;
+    modbus_store_apply_config_mirror(&mb, false);
     ESP_LOGI(TAG, "init: %d slots, magic=0x%04x",
              MODBUS_STORE_REG_COUNT, (unsigned)HYDRA_MODBUS_MAGIC_VALUE);
 
-    esp_err_t err = modbus_slave_driver_start();
+    esp_err_t err = ESP_OK;
+    if (mb.enabled) {
+        err = modbus_slave_driver_start();
+    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "modbus_slave_driver_start failed: 0x%x", err);
         g_store[HYDRA_MODBUS_REG_MODBUS_STATUS] = HYDRA_MODBUS_STATUS_ERROR;
+    } else {
+        modbus_store_apply_config_mirror(&mb, modbus_slave_driver_is_running());
     }
     return ESP_OK;
 }

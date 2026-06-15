@@ -29,7 +29,7 @@
 #define FSCI_TRAILER_LEN_BYTES        2     /* CRC16 LE */
 #define FSCI_FRAME_OVERHEAD_BYTES     (FSCI_HEADER_LEN_BYTES + FSCI_TRAILER_LEN_BYTES)
 
-/* Op groups (from the Java decomp's M.* constants and live captures). */
+/* Op groups from protocol constants observed in live captures. */
 #define FSCI_OG_C2CI_REQUEST          0xde
 #define FSCI_OG_C2CI_CONFIRM          0xdf
 
@@ -54,7 +54,7 @@ uint16_t fsci_crc16(const uint8_t *data, size_t len);
  *
  * payload may be NULL when payload_len == 0. The reserved-flags field
  * is always written as 0x0000 -- the v1 protocol does not use the
- * group-id / no-respond bits documented in the Java decomp. */
+ * group-id / no-respond bits. */
 int fsci_build(uint8_t op_group,
                uint8_t op_code,
                uint16_t msg_id,

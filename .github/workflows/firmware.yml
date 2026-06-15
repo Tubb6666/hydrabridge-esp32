@@ -1,0 +1,81 @@
+name: Firmware
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ESP32-S3 firmware
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.4
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Package firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(printf '%s' "${GITHUB_REF_NAME:-dev}" | tr -c 'A-Za-z0-9._-' '-')"
+          PACKAGE_DIR="release/hydrabridge-esp32-firmware-${VERSION}"
+          export PACKAGE_DIR
+          mkdir -p "$PACKAGE_DIR"
+          cp build/hydra_ble_controller.bin "$PACKAGE_DIR/"
+          cp build/bootloader/bootloader.bin "$PACKAGE_DIR/"
+          cp build/partition_table/partition-table.bin "$PACKAGE_DIR/"
+          cp build/ota_data_initial.bin "$PACKAGE_DIR/"
+          cp build/flash_args "$PACKAGE_DIR/"
+          cp scripts/flash.sh "$PACKAGE_DIR/"
+          cp scripts/flash.ps1 "$PACKAGE_DIR/"
+          cp docs/quickstart.md "$PACKAGE_DIR/README-quickstart.md"
+          chmod +x "$PACKAGE_DIR/flash.sh"
+          python - <<'PY'
+          import os
+          import zipfile
+          package_dir = os.environ.get("PACKAGE_DIR")
+          zip_path = f"{package_dir}.zip"
+          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+              for root, _, files in os.walk(package_dir):
+                  for name in files:
+                      path = os.path.join(root, name)
+                      zf.write(path, os.path.relpath(path, os.path.dirname(package_dir)))
+          print(zip_path)
+          PY
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hydrabridge-esp32-firmware-${{ github.run_number }}
+          path: |
+            release/hydrabridge-esp32-firmware-*.zip
+            release/hydrabridge-esp32-firmware-*/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            release/hydrabridge-esp32-firmware-*.zip
+            release/hydrabridge-esp32-firmware-*/*.bin
+            release/hydrabridge-esp32-firmware-*/flash.sh
+            release/hydrabridge-esp32-firmware-*/flash.ps1

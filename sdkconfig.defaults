@@ -19,11 +19,13 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # ---- Flash + partition table ----
 # Custom OTA-friendly partition table. See partitions.csv at project root.
+# Target board (Waveshare Industrial ESP32-S3) has 16MB QSPI flash;
+# we configure for full size and use enlarged OTA slots.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
-CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
 # ---- OTA rollback on boot failure ----
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
@@ -34,3 +36,25 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
 CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=y
 CONFIG_BT_CTRL_PINNED_TO_CORE_0=y
+
+# Enable BLE 5.0 extended advertising / extended create connection.
+# Required for CSA #2 (Channel Selection Algorithm 2) in CONNECT_IND.
+# The Hydra silently rejects legacy CSA #1 CONNECT_INDs.
+CONFIG_BT_NIMBLE_EXT_ADV=y
+
+# Additional coexistence hardening for *simultaneous* WiFi STA+MQTT + NimBLE *Central*
+# (scan + connect + GATT writes of FSCI/LiveDemoScene frames) without stopping WiFi.
+# Strategy: core separation + BT preference (set at runtime in app_main) + reduced
+# BLE radio duty cycle in application scan/conn params (see ble_light_client.c and
+# ble_scanner.c) + sufficient controller resources for scheduling under WiFi traffic.
+# NOTE: runtime code will use moderate itvl/window (not 100% duty) and will no longer
+# force esp_wifi_stop around every command. WiFi PS is forced off at runtime too.
+CONFIG_BT_CTRL_BLE_MAX_ACT=8
+CONFIG_BT_CTRL_BLE_MAX_ACT_EFF=8
+CONFIG_BT_CTRL_SCAN_DUPL_CACHE_SIZE=200
+CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=200
+CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_SUPP=y
+
+# NimBLE host buffers already sized for our ~67-byte frames + fragmentation at MTU~256.
+# If under heavy contention you see HCI acks or drops, increase ACL count here:
+# CONFIG_BT_NIMBLE_ACL_BUF_COUNT=32  (default 24 is usually sufficient)

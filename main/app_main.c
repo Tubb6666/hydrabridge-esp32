@@ -41,11 +41,11 @@ static void diag_test_task(void *arg)
     registered_light_t l = {0};
     strncpy(l.light_id,     "diag", LIGHT_ID_LEN - 1);
     strncpy(l.display_name, "Diag", LIGHT_NAME_LEN - 1);
-    strncpy(l.serial,       "9Q9B0BE6D2R1EB", LIGHT_SERIAL_LEN - 1);
-    /* Hydra MAC 1C:BC:EC:0B:E6:D2 — wire-order is reverse so the
+    strncpy(l.serial,       "HYDRA64EXMPL01", LIGHT_SERIAL_LEN - 1);
+    /* Hydra MAC AA:BB:CC:11:22:33 — wire-order is reverse so the
      * registry stores it MSB-first. */
-    l.ble_addr[0] = 0x1C; l.ble_addr[1] = 0xBC; l.ble_addr[2] = 0xEC;
-    l.ble_addr[3] = 0x0B; l.ble_addr[4] = 0xE6; l.ble_addr[5] = 0xD2;
+    l.ble_addr[0] = 0xAA; l.ble_addr[1] = 0xBB; l.ble_addr[2] = 0xCC;
+    l.ble_addr[3] = 0x11; l.ble_addr[4] = 0x22; l.ble_addr[5] = 0x33;
     l.ble_addr_type = BLE_ADDR_PUBLIC;
     l.model         = 335;
     l.enabled       = true;

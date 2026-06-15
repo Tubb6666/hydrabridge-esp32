@@ -11,6 +11,7 @@ void register_channel_model_tests(void);
 void register_hydra64hd_tests(void);
 void register_preset_engine_tests(void);
 void register_light_registry_tests(void);
+void register_ble_scanner_tests(void);
 void register_command_queue_tests(void);
 void register_command_engine_tests(void);
 void register_modbus_interface_tests(void);

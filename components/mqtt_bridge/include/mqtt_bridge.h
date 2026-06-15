@@ -19,6 +19,8 @@ int mqtt_parse_light_command(const char *json_text,
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 esp_err_t mqtt_bridge_init(void);
+esp_err_t mqtt_bridge_reconfigure(void);
+bool mqtt_bridge_is_connected(void);
 #endif
 
 #endif /* HYDRA_MQTT_BRIDGE_H */

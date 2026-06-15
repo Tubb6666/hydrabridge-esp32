@@ -37,6 +37,7 @@ set(MODULE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/hydra64hd_protocol/src/hydra64hd_protocol.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/preset_engine/src/preset_engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/light_registry/src/light_registry.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble_scanner/src/ble_scanner.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_queue/src/command_queue.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_engine/src/command_engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/modbus_interface/src/modbus_interface.c
@@ -62,6 +63,7 @@ target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/hydra64hd_protocol/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/preset_engine/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/light_registry/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble_scanner/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_queue/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/command_engine/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/modbus_interface/include

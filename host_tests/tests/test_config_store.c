@@ -31,7 +31,7 @@ static void test_modbus_defaults_match_spec(void)
 {
     config_modbus_t m;
     config_defaults_modbus(&m);
-    TEST_ASSERT_TRUE(m.enabled);
+    TEST_ASSERT_FALSE(m.enabled);
     TEST_ASSERT_FALSE(m.master_mode_enabled);
     TEST_ASSERT_EQUAL_UINT8(10,    m.slave_address);
     TEST_ASSERT_EQUAL_UINT32(19200, m.baud_rate);
@@ -39,7 +39,7 @@ static void test_modbus_defaults_match_spec(void)
     TEST_ASSERT_EQUAL_INT(MODBUS_PARITY_EVEN, m.parity);
     TEST_ASSERT_EQUAL_UINT8(1,     m.stop_bits);
     TEST_ASSERT_EQUAL_UINT8(1,     m.uart_port);
-    /* Waveshare Industrial ESP32-S3 Control Board RS485 pinout. */
+    /* RS485 pinout for this controller build. */
     TEST_ASSERT_EQUAL_INT8(17,     m.tx_pin);
     TEST_ASSERT_EQUAL_INT8(18,     m.rx_pin);
     TEST_ASSERT_EQUAL_INT8(4,      m.rts_de_pin);
@@ -57,6 +57,8 @@ static void test_wifi_defaults_match_spec(void)
     TEST_ASSERT_EQUAL_STRING("", w.ssid);
     TEST_ASSERT_EQUAL_STRING("", w.password);
     TEST_ASSERT_TRUE(w.ap_fallback_enabled);
+    TEST_ASSERT_EQUAL_STRING("HydraBridge-Setup", w.ap_ssid);
+    TEST_ASSERT_EQUAL_STRING("hydrabridge", w.ap_password);
 }
 
 /* ---- mqtt defaults (refs spec L263-L273) ---- */
@@ -65,13 +67,16 @@ static void test_mqtt_defaults_match_spec(void)
 {
     config_mqtt_t m;
     config_defaults_mqtt(&m);
-    TEST_ASSERT_TRUE(m.enabled);
+    TEST_ASSERT_FALSE(m.enabled);
     TEST_ASSERT_EQUAL_STRING("", m.host);
     TEST_ASSERT_EQUAL_UINT16(1883, m.port);
+    TEST_ASSERT_FALSE(m.use_tls);
     TEST_ASSERT_EQUAL_STRING("", m.username);
     TEST_ASSERT_EQUAL_STRING("", m.password);
+    TEST_ASSERT_EQUAL_STRING("hydrabridge-esp32", m.client_id);
+    TEST_ASSERT_EQUAL_UINT16(60, m.keepalive_sec);
     TEST_ASSERT_EQUAL_STRING("aihydra",       m.base_topic);
-    TEST_ASSERT_TRUE(m.home_assistant_discovery);
+    TEST_ASSERT_FALSE(m.home_assistant_discovery);
     TEST_ASSERT_EQUAL_STRING("homeassistant", m.home_assistant_prefix);
 }
 

@@ -65,6 +65,22 @@ static ce_result_t build_state_for_kind(const ce_request_t *req,
             out->values[0] = req->ramp_from;
             return CE_RESULT_ACCEPTED;
 
+        case CE_KIND_INTENSITY_ADJUST: {
+            /* Full intensity logic: start from current last_state (preserves exact current color mix),
+             * add delta (pos for increase, neg for decrease) to ALL 9 channel intensities,
+             * clamp [0,1000]. This works for arbitrary colors/profiles. Delta typically +/-50 or +/-100.
+             * Uses last_state so it adjusts "the current scene" without needing full channels in the cmd. */
+            if (!light) return CE_RESULT_INVALID_TARGET;
+            *out = light->last_state;
+            for (size_t i = 0; i < CHANNEL_COUNT; ++i) {
+                int32_t v = (int32_t)out->values[i] + req->intensity_delta;
+                if (v < 0) v = 0;
+                if (v > 1000) v = 1000;
+                out->values[i] = (uint16_t)v;
+            }
+            return CE_RESULT_ACCEPTED;
+        }
+
         case CE_KIND_IDENTIFY:
             return preset_expand(PRESET_ON, out) == 0
                 ? CE_RESULT_ACCEPTED : CE_RESULT_INTERNAL_ERROR;
@@ -81,23 +97,18 @@ static cmd_type_t kind_to_cmd_type(ce_kind_t k)
         case CE_KIND_POWER_ON:
         case CE_KIND_POWER_OFF:
         case CE_KIND_PRESET:
-        case CE_KIND_SET_CHANNELS: return CMD_TYPE_SET_CHANNELS;
-        case CE_KIND_RAMP:         return CMD_TYPE_RAMP;
-        case CE_KIND_IDENTIFY:     return CMD_TYPE_IDENTIFY;
-        default:                   return CMD_TYPE_NONE;
+        case CE_KIND_SET_CHANNELS:
+        case CE_KIND_INTENSITY_ADJUST: return CMD_TYPE_SET_CHANNELS;
+        case CE_KIND_RAMP:             return CMD_TYPE_RAMP;
+        case CE_KIND_IDENTIFY:         return CMD_TYPE_IDENTIFY;
+        default:                       return CMD_TYPE_NONE;
     }
 }
 
-ce_result_t command_engine_submit(const ce_request_t *req,
-                                  char out_command_id[CMD_ID_LEN])
+static ce_result_t submit_to_light(const ce_request_t *req,
+                                   const registered_light_t *light,
+                                   char out_command_id[CMD_ID_LEN])
 {
-    if (!req || !out_command_id) return CE_RESULT_INVALID_COMMAND;
-    out_command_id[0] = '\0';
-
-    if (req->target_id[0] == '\0') return CE_RESULT_INVALID_TARGET;
-    const registered_light_t *light = light_registry_get(req->target_id);
-    if (!light) return CE_RESULT_INVALID_TARGET;
-
     channel_state_t state;
     ce_result_t r = build_state_for_kind(req, light, &state);
     if (r != CE_RESULT_ACCEPTED) return r;
@@ -127,6 +138,54 @@ ce_result_t command_engine_submit(const ce_request_t *req,
     strncpy(out_command_id, cmd.command_id, CMD_ID_LEN - 1);
     out_command_id[CMD_ID_LEN - 1] = '\0';
     return CE_RESULT_ACCEPTED;
+}
+
+ce_result_t command_engine_submit(const ce_request_t *req,
+                                  char out_command_id[CMD_ID_LEN])
+{
+    if (!req || !out_command_id) return CE_RESULT_INVALID_COMMAND;
+    out_command_id[0] = '\0';
+
+    if (req->target_id[0] == '\0') return CE_RESULT_INVALID_TARGET;
+    if (req->target_type == CE_TARGET_GROUP) {
+        const light_group_t *group = group_registry_get(req->target_id);
+        if (!group || !group->enabled || group->member_count == 0) {
+            return CE_RESULT_INVALID_TARGET;
+        }
+
+        ce_result_t first_error = CE_RESULT_ACCEPTED;
+        size_t accepted = 0;
+        for (uint8_t i = 0; i < group->member_count; ++i) {
+            const registered_light_t *light = light_registry_get(group->light_ids[i]);
+            if (!light || !light->enabled) {
+                if (first_error == CE_RESULT_ACCEPTED) first_error = CE_RESULT_INVALID_TARGET;
+                continue;
+            }
+            ce_request_t member_req = *req;
+            member_req.target_type = CE_TARGET_LIGHT;
+            strncpy(member_req.target_id, light->light_id, LIGHT_ID_LEN - 1);
+            member_req.target_id[LIGHT_ID_LEN - 1] = '\0';
+            char member_command_id[CMD_ID_LEN] = {0};
+            ce_result_t r = submit_to_light(&member_req, light, member_command_id);
+            if (r == CE_RESULT_ACCEPTED) {
+                ++accepted;
+                if (out_command_id[0] == '\0') {
+                    strncpy(out_command_id, member_command_id, CMD_ID_LEN - 1);
+                    out_command_id[CMD_ID_LEN - 1] = '\0';
+                }
+            } else if (first_error == CE_RESULT_ACCEPTED) {
+                first_error = r;
+            }
+        }
+
+        if (accepted == group->member_count) return CE_RESULT_ACCEPTED;
+        if (accepted > 0) return CE_RESULT_PARTIAL_FAILURE;
+        return first_error == CE_RESULT_ACCEPTED ? CE_RESULT_INVALID_TARGET : first_error;
+    }
+
+    const registered_light_t *light = light_registry_get(req->target_id);
+    if (!light || !light->enabled) return CE_RESULT_INVALID_TARGET;
+    return submit_to_light(req, light, out_command_id);
 }
 
 #ifdef ESP_PLATFORM

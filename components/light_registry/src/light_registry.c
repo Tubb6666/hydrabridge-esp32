@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +27,45 @@ static size_t             g_light_count;
 
 static light_group_t      g_groups[GROUP_REGISTRY_CAPACITY];
 static size_t             g_group_count;
+
+void hydra_ble_addr_from_nimble(uint8_t out[BLE_ADDR_BYTES],
+                                const uint8_t nimble_val[BLE_ADDR_BYTES])
+{
+    if (!out || !nimble_val) return;
+    for (size_t i = 0; i < BLE_ADDR_BYTES; ++i) {
+        out[i] = nimble_val[BLE_ADDR_BYTES - 1 - i];
+    }
+}
+
+void hydra_ble_addr_to_nimble(uint8_t out[BLE_ADDR_BYTES],
+                              const uint8_t canonical[BLE_ADDR_BYTES])
+{
+    hydra_ble_addr_from_nimble(out, canonical);
+}
+
+int hydra_ble_addr_format(const uint8_t addr[BLE_ADDR_BYTES],
+                          char *out, size_t cap)
+{
+    if (!addr || !out || cap < 18) return -1;
+    int n = snprintf(out, cap, "%02x:%02x:%02x:%02x:%02x:%02x",
+                     addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+    return (n == 17) ? 0 : -1;
+}
+
+int hydra_ble_addr_parse(const char *text, uint8_t out[BLE_ADDR_BYTES])
+{
+    if (!text || !out) return -1;
+    unsigned int b[BLE_ADDR_BYTES];
+    char tail = '\0';
+    int n = sscanf(text, "%x:%x:%x:%x:%x:%x%c",
+                   &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &tail);
+    if (n != BLE_ADDR_BYTES) return -1;
+    for (size_t i = 0; i < BLE_ADDR_BYTES; ++i) {
+        if (b[i] > 0xff) return -1;
+        out[i] = (uint8_t)b[i];
+    }
+    return 0;
+}
 
 void light_registry_reset(void)
 {
@@ -138,6 +179,39 @@ int light_registry_set_enabled(const char *light_id, bool enabled)
     int idx = find_light_idx(light_id);
     if (idx < 0) return -1;
     g_lights[idx].enabled = enabled;
+    return 0;
+}
+
+int light_registry_rename(const char *light_id, const char *display_name)
+{
+    int idx = find_light_idx(light_id);
+    if (idx < 0 || !display_name) return -1;
+
+    while (*display_name && isspace((unsigned char)*display_name)) {
+        ++display_name;
+    }
+    size_t len = strnlen(display_name, LIGHT_NAME_LEN);
+    while (len > 0 && isspace((unsigned char)display_name[len - 1])) {
+        --len;
+    }
+    if (len == 0) return -1;
+    if (len >= LIGHT_NAME_LEN) len = LIGHT_NAME_LEN - 1;
+
+    memcpy(g_lights[idx].display_name, display_name, len);
+    g_lights[idx].display_name[len] = '\0';
+    return 0;
+}
+
+int light_registry_update_discovery(const char *light_id,
+                                    const uint8_t addr[BLE_ADDR_BYTES],
+                                    ble_addr_type_t addr_type,
+                                    int8_t rssi)
+{
+    int idx = find_light_idx(light_id);
+    if (idx < 0 || !addr) return -1;
+    memcpy(g_lights[idx].ble_addr, addr, BLE_ADDR_BYTES);
+    g_lights[idx].ble_addr_type = addr_type;
+    g_lights[idx].last_seen_rssi = rssi;
     return 0;
 }
 

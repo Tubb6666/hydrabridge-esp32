@@ -24,6 +24,28 @@ static void setup(void)
     light_registry_add(&l);
 }
 
+static void add_second_light_and_group(void)
+{
+    registered_light_t l;
+    memset(&l, 0, sizeof l);
+    strncpy(l.light_id, "L2", LIGHT_ID_LEN - 1);
+    strncpy(l.display_name, "Test 2", LIGHT_NAME_LEN - 1);
+    strncpy(l.serial, "S2", LIGHT_SERIAL_LEN - 1);
+    l.model = 335;
+    l.enabled = true;
+    light_registry_add(&l);
+
+    light_group_t g;
+    memset(&g, 0, sizeof g);
+    strncpy(g.group_id, "G1", GROUP_ID_LEN - 1);
+    strncpy(g.display_name, "Group", LIGHT_NAME_LEN - 1);
+    strncpy(g.light_ids[0], "L1", LIGHT_ID_LEN - 1);
+    strncpy(g.light_ids[1], "L2", LIGHT_ID_LEN - 1);
+    g.member_count = 2;
+    g.enabled = true;
+    group_registry_add(&g);
+}
+
 static void make_req(ce_request_t *r, ce_kind_t kind, const char *target)
 {
     memset(r, 0, sizeof *r);
@@ -278,6 +300,41 @@ static void test_custom_timeouts_honored(void)
     TEST_ASSERT_EQUAL_UINT32(5000, cmd.timeout_ms);
 }
 
+static void test_group_target_fans_out_to_members(void)
+{
+    setup();
+    add_second_light_and_group();
+    ce_request_t r;
+    make_req(&r, CE_KIND_SET_CHANNELS, "G1");
+    r.target_type = CE_TARGET_GROUP;
+    r.replace = true;
+    r.channels[0].name = "brightness"; r.channels[0].value = 700;
+    r.channels[1].name = "blue";       r.channels[1].value = 500;
+    r.channel_count = 2;
+    char id[CMD_ID_LEN];
+    TEST_ASSERT_EQUAL_INT(CE_RESULT_ACCEPTED, command_engine_submit(&r, id));
+    TEST_ASSERT_EQUAL_size_t(1, cmd_queue_depth("L1"));
+    TEST_ASSERT_EQUAL_size_t(1, cmd_queue_depth("L2"));
+
+    pending_command_t cmd;
+    cmd_queue_pop("L1", &cmd);
+    TEST_ASSERT_EQUAL_UINT16(700, cmd.state.values[0]);
+    TEST_ASSERT_EQUAL_UINT16(500, cmd.state.values[2]);
+    cmd_queue_pop("L2", &cmd);
+    TEST_ASSERT_EQUAL_UINT16(700, cmd.state.values[0]);
+    TEST_ASSERT_EQUAL_UINT16(500, cmd.state.values[2]);
+}
+
+static void test_group_target_empty_or_missing_rejected(void)
+{
+    setup();
+    ce_request_t r;
+    make_req(&r, CE_KIND_POWER_ON, "NO_GROUP");
+    r.target_type = CE_TARGET_GROUP;
+    char id[CMD_ID_LEN];
+    TEST_ASSERT_EQUAL_INT(CE_RESULT_INVALID_TARGET, command_engine_submit(&r, id));
+}
+
 void register_command_engine_tests(void)
 {
     RUN_TEST(test_unknown_target);
@@ -297,4 +354,6 @@ void register_command_engine_tests(void)
     RUN_TEST(test_generated_command_ids_are_unique);
     RUN_TEST(test_queue_full);
     RUN_TEST(test_custom_timeouts_honored);
+    RUN_TEST(test_group_target_fans_out_to_members);
+    RUN_TEST(test_group_target_empty_or_missing_rejected);
 }

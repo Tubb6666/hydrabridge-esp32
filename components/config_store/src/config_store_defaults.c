@@ -25,7 +25,7 @@ void config_defaults_modbus(config_modbus_t *out)
 {
     if (!out) return;
     memset(out, 0, sizeof *out);
-    out->enabled              = true;
+    out->enabled              = false;
     out->master_mode_enabled  = false;
     out->slave_address        = 10;
     out->baud_rate            = 19200;
@@ -33,10 +33,7 @@ void config_defaults_modbus(config_modbus_t *out)
     out->parity               = MODBUS_PARITY_EVEN;
     out->stop_bits            = 1;
     out->uart_port            = 1;
-    /* RS485 pins for the Waveshare Industrial ESP32-S3 Control Board.
-     * CONFIRM against the Waveshare wiki for this board variant; if
-     * the silkscreen says different GPIOs, override via NVS at runtime
-     * without re-flashing. */
+    /* Default RS485 wiring for this controller build. */
     out->tx_pin               = 17;
     out->rx_pin               = 18;
     out->rts_de_pin           = 4;
@@ -52,18 +49,31 @@ void config_defaults_wifi(config_wifi_t *out)
     out->ssid[0]             = '\0';
     out->password[0]         = '\0';
     out->ap_fallback_enabled = true;
+    strncpy(out->ap_ssid,     "HydraBridge-Setup", sizeof out->ap_ssid - 1);
+    strncpy(out->ap_password, "hydrabridge",       sizeof out->ap_password - 1);
 }
 
 void config_defaults_mqtt(config_mqtt_t *out)
 {
     if (!out) return;
     memset(out, 0, sizeof *out);
-    out->enabled                  = true;
+    out->enabled                  = false;
     out->host[0]                  = '\0';
     out->port                     = 1883;
+    out->use_tls                  = false;
     out->username[0]              = '\0';
     out->password[0]              = '\0';
+    strncpy(out->client_id,             "hydrabridge-esp32", sizeof out->client_id - 1);
+    out->keepalive_sec            = 60;
     strncpy(out->base_topic,            "aihydra",       sizeof out->base_topic - 1);
-    out->home_assistant_discovery = true;
+    out->home_assistant_discovery = false;
     strncpy(out->home_assistant_prefix, "homeassistant", sizeof out->home_assistant_prefix - 1);
+}
+
+void config_defaults_profiles(config_profiles_t *out)
+{
+    if (!out) return;
+    memset(out, 0, sizeof *out);
+    /* No built-in user profiles by default; user saves via UI or API.
+     * count=0 means empty list; falls back cleanly. */
 }

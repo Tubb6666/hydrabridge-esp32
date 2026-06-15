@@ -1,6 +1,6 @@
-# Hydra 64HD BLE Protocol — Technical Reference
+# Hydra® 64HD BLE Protocol — Technical Reference
 
-Clean reference for the myAI / Mobius BLE protocol as used by the Aqua Illumination **Hydra 64HD** light. This document tells you *what to send and what comes back*. For the experimental derivation see [`myai-ble-reverse-engineering.md`](myai-ble-reverse-engineering.md); for application-level design see [`esp32-hydra64hd-controller-plan.md`](esp32-hydra64hd-controller-plan.md).
+Clean reference for the myAI / Mobius® BLE protocol as used by the Aqua Illumination **Hydra® 64HD** light. This document tells you *what to send and what comes back*. For the experimental derivation see [`myai-ble-reverse-engineering.md`](myai-ble-reverse-engineering.md); for application-level design see [`esp32-hydra64hd-controller-plan.md`](esp32-hydra64hd-controller-plan.md).
 
 Every fact in this doc is byte-exact verified against captured hardware traces (`docs/myai-ble-reverse-engineering.md` lines 906–1149) and exercised by the host-test suite in `host_tests/tests/`.
 
@@ -73,7 +73,7 @@ Reference implementation in `components/fsci_codec/src/fsci_codec.c` (`fsci_crc1
 
 ### Message IDs
 
-A 16-bit, little-endian, monotonically incrementing counter. The light echoes the request `msg_id` in its confirm so requests and responses can be correlated. Wrap at `0xFFFF` is acceptable; the decompiled myAI source wraps at `20000` instead, but the lower-range arithmetic is identical.
+A 16-bit, little-endian, monotonically incrementing counter. The light echoes the request `msg_id` in its confirm so requests and responses can be correlated. Wrap at `0xFFFF` is acceptable; the validated low-range behavior is independent of the upper wrap policy.
 
 ---
 
@@ -111,7 +111,7 @@ offset  size  meaning
 6       N     element bytes
 ```
 
-For SupportedColorChannels on the Hydra 64HD the element bytes are the channel visual IDs in fixture order:
+For SupportedColorChannels on the Hydra® 64HD the element bytes are the channel visual IDs in fixture order:
 
 ```
 01 10 11 19 17 15 13 12 1E
@@ -168,7 +168,7 @@ offset  size  meaning
 | 7 | `0x12` | `royalblue`   | |
 | 8 | `0x1E` | `moonlight`   | Dim white moonlight emitter on this fixture |
 
-> **Important**: 8-channel payloads are accepted at the FSCI status level but do **not** produce visible LED output on the tested Hydra 64HD. All 9 triples are required even when several are zero.
+> **Important**: 8-channel payloads are accepted at the FSCI status level but do **not** produce visible LED output on the tested Hydra® 64HD. All 9 triples are required even when several are zero.
 
 ### Intensity rules
 
@@ -211,7 +211,7 @@ Composed by chaining `hydra64_build_live_demo_scene_write(...)` into `fsci_build
 3. Write to TX Final (or split between TX Data and TX Final if it exceeds the MTU).
 4. Wait for a notify on RX Final with matching `msg_id`. Successful payload starts with `0x00`.
 
-For the Hydra 64HD's typical MTU (~23 bytes default, often negotiated up), the 67-byte On frame splits into roughly 3 chunks: 2 to TX Data, 1 to TX Final.
+For the Hydra® 64HD's typical MTU (~23 bytes default, often negotiated up), the 67-byte On frame splits into roughly 3 chunks: 2 to TX Data, 1 to TX Final.
 
 ---
 
@@ -224,7 +224,7 @@ For the Hydra 64HD's typical MTU (~23 bytes default, often negotiated up), the 6
 | `0x0398` | 920    | `Intensity` (legacy direct)| ❌ Returned NotPermitted in tests |
 | `0x039A` | 922    | `Ramp` (fixture-side)      | ❌ Not validated; v1 uses host-driven ramp |
 
-For a richer list see the `M.SupportedAttribute` enum in the decompiled APK (`reference/decompiled/.../utilities/Crc.java` neighborhood).
+For v1, only the attributes above are required by the controller. Additional fixture attributes can be added later from fresh captures and hardware validation.
 
 ---
 

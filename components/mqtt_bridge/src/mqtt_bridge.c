@@ -10,8 +10,24 @@
 #include "preset_engine.h"
 
 #ifdef ESP_PLATFORM
+#include <stdio.h>
+
+#include "config_store.h"
+#include "esp_event.h"
 #include "esp_log.h"
+#include "mqtt_client.h"
+#include "ha_discovery.h"
+#include "light_registry.h"
+#include "modbus_interface.h"
+#include "modbus_registers.h"
 static const char *TAG = "mqtt_bridge";
+
+static esp_mqtt_client_handle_t s_client;
+static config_mqtt_t s_cfg;
+static config_controller_t s_controller_cfg;
+static bool s_connected;
+static char s_uri[128];
+static char s_lwt_topic[128];
 #endif
 
 static void copy_str(char *dst, size_t cap, const char *src)
@@ -132,9 +148,272 @@ int mqtt_parse_light_command(const char *json_text,
 }
 
 #ifdef ESP_PLATFORM
+
+static void mqtt_status_set(bool enabled, bool connected)
+{
+    uint16_t status = HYDRA_MQTT_STATUS_DISABLED;
+    if (enabled) status = connected ? HYDRA_MQTT_STATUS_CONNECTED : HYDRA_MQTT_STATUS_DISCONNECTED;
+
+    modbus_store_set(HYDRA_MODBUS_REG_MQTT_STATUS, status);
+
+    uint16_t cs = modbus_store_get(HYDRA_MODBUS_REG_CONTROLLER_STATUS);
+    uint16_t cf = modbus_store_get(HYDRA_MODBUS_REG_CONFIG_FLAGS);
+    if (enabled) {
+        cs |= HYDRA_CS_BIT_MQTT_ENABLED;
+        cf |= HYDRA_CF_BIT_MQTT_ENABLED;
+    } else {
+        cs &= (uint16_t)~HYDRA_CS_BIT_MQTT_ENABLED;
+        cf &= (uint16_t)~HYDRA_CF_BIT_MQTT_ENABLED;
+    }
+    if (connected) {
+        cs |= HYDRA_CS_BIT_MQTT_CONNECTED;
+    } else {
+        cs &= (uint16_t)~HYDRA_CS_BIT_MQTT_CONNECTED;
+    }
+    if (enabled && s_cfg.home_assistant_discovery) {
+        cf |= HYDRA_CF_BIT_HA_DISCOVERY_ENABLED;
+    } else {
+        cf &= (uint16_t)~HYDRA_CF_BIT_HA_DISCOVERY_ENABLED;
+    }
+    modbus_store_set(HYDRA_MODBUS_REG_CONTROLLER_STATUS, cs);
+    modbus_store_set(HYDRA_MODBUS_REG_CONFIG_FLAGS, cf);
+}
+
+static void base_prefix(char *out, size_t cap)
+{
+    snprintf(out, cap, "%s/%s", s_cfg.base_topic, s_controller_cfg.controller_id);
+}
+
+static int mqtt_publish_cb(const char *topic, const char *payload, void *user)
+{
+    (void)user;
+    if (!s_client || !topic || !payload) return -1;
+    return esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+}
+
+static void mqtt_publish_availability(const char *value)
+{
+    if (!s_client || !s_connected) return;
+    char topic[128];
+    char base[96];
+    base_prefix(base, sizeof base);
+    snprintf(topic, sizeof topic, "%s/availability", base);
+    esp_mqtt_client_publish(s_client, topic, value, 0, 1, 1);
+}
+
+static void mqtt_subscribe_commands(void)
+{
+    if (!s_client) return;
+    char base[96];
+    char topic[128];
+    base_prefix(base, sizeof base);
+    snprintf(topic, sizeof topic, "%s/light/+/set", base);
+    esp_mqtt_client_subscribe(s_client, topic, 1);
+    snprintf(topic, sizeof topic, "%s/group/+/set", base);
+    esp_mqtt_client_subscribe(s_client, topic, 1);
+}
+
+static bool extract_target_from_topic(const char *topic,
+                                      ce_target_type_t *target_type,
+                                      char *target_id,
+                                      size_t target_cap)
+{
+    if (!topic || !target_type || !target_id || target_cap == 0) return false;
+
+    char light_prefix[128];
+    char group_prefix[128];
+    char base[96];
+    base_prefix(base, sizeof base);
+    snprintf(light_prefix, sizeof light_prefix, "%s/light/", base);
+    snprintf(group_prefix, sizeof group_prefix, "%s/group/", base);
+
+    const char *id_start = NULL;
+    if (strncmp(topic, light_prefix, strlen(light_prefix)) == 0) {
+        *target_type = CE_TARGET_LIGHT;
+        id_start = topic + strlen(light_prefix);
+    } else if (strncmp(topic, group_prefix, strlen(group_prefix)) == 0) {
+        *target_type = CE_TARGET_GROUP;
+        id_start = topic + strlen(group_prefix);
+    } else {
+        return false;
+    }
+
+    const char *suffix = strstr(id_start, "/set");
+    if (!suffix || suffix[4] != '\0') return false;
+    size_t n = (size_t)(suffix - id_start);
+    if (n == 0 || n >= target_cap) return false;
+    memcpy(target_id, id_start, n);
+    target_id[n] = '\0';
+    return true;
+}
+
+static void publish_command_result(ce_target_type_t target_type,
+                                   const char *target_id,
+                                   ce_result_t result,
+                                   const char *command_id)
+{
+    if (!s_client || !s_connected || !target_id) return;
+    char base[96];
+    char topic[160];
+    char payload[160];
+    base_prefix(base, sizeof base);
+    snprintf(topic, sizeof topic, "%s/%s/%s/result", base,
+             target_type == CE_TARGET_GROUP ? "group" : "light", target_id);
+    snprintf(payload, sizeof payload,
+             "{\"result\":%d,\"command_id\":\"%s\"}",
+             (int)result, command_id ? command_id : "");
+    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 0);
+}
+
+static void handle_mqtt_data(const esp_mqtt_event_handle_t event)
+{
+    if (!event || event->topic_len <= 0 || event->data_len <= 0) return;
+    char topic[192];
+    char payload[768];
+    size_t topic_len = (size_t)event->topic_len;
+    size_t data_len = (size_t)event->data_len;
+    if (topic_len >= sizeof topic) topic_len = sizeof topic - 1;
+    if (data_len >= sizeof payload) data_len = sizeof payload - 1;
+    memcpy(topic, event->topic, topic_len);
+    topic[topic_len] = '\0';
+    memcpy(payload, event->data, data_len);
+    payload[data_len] = '\0';
+
+    ce_target_type_t target_type = CE_TARGET_LIGHT;
+    char target_id[LIGHT_ID_LEN];
+    if (!extract_target_from_topic(topic, &target_type, target_id, sizeof target_id)) {
+        ESP_LOGW(TAG, "ignored topic: %s", topic);
+        return;
+    }
+
+    ce_request_t req;
+    if (mqtt_parse_light_command(payload, target_id, &req) != 0) {
+        publish_command_result(target_type, target_id, CE_RESULT_INVALID_COMMAND, "");
+        return;
+    }
+    req.source = CMD_SOURCE_MQTT;
+    req.target_type = target_type;
+    strncpy(req.target_id, target_id, LIGHT_ID_LEN - 1);
+    req.target_id[LIGHT_ID_LEN - 1] = '\0';
+
+    char cmd_id[CMD_ID_LEN];
+    ce_result_t result = command_engine_submit(&req, cmd_id);
+    publish_command_result(target_type, target_id, result, cmd_id);
+}
+
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
+                               int32_t event_id, void *event_data)
+{
+    (void)handler_args;
+    (void)base;
+    esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+    switch ((esp_mqtt_event_id_t)event_id) {
+        case MQTT_EVENT_CONNECTED:
+            s_connected = true;
+            mqtt_status_set(s_cfg.enabled, true);
+            mqtt_publish_availability("online");
+            mqtt_subscribe_commands();
+            if (s_cfg.home_assistant_discovery) {
+                char ha_base[96];
+                base_prefix(ha_base, sizeof ha_base);
+                ha_discovery_publish_all(s_controller_cfg.controller_id,
+                                         ha_base,
+                                         s_cfg.home_assistant_prefix,
+                                         mqtt_publish_cb, NULL);
+            }
+            ESP_LOGI(TAG, "connected");
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            s_connected = false;
+            mqtt_status_set(s_cfg.enabled, false);
+            ESP_LOGW(TAG, "disconnected");
+            break;
+        case MQTT_EVENT_DATA:
+            handle_mqtt_data(event);
+            break;
+        case MQTT_EVENT_ERROR:
+            ESP_LOGW(TAG, "mqtt event error");
+            break;
+        default:
+            break;
+    }
+}
+
+static esp_err_t mqtt_bridge_stop_client(void)
+{
+    if (!s_client) return ESP_OK;
+    mqtt_publish_availability("offline");
+    esp_err_t stop_err = esp_mqtt_client_stop(s_client);
+    esp_err_t destroy_err = esp_mqtt_client_destroy(s_client);
+    s_client = NULL;
+    s_connected = false;
+    if (stop_err != ESP_OK) return stop_err;
+    return destroy_err;
+}
+
+esp_err_t mqtt_bridge_reconfigure(void)
+{
+    config_store_load_mqtt(&s_cfg);
+    config_store_load_controller(&s_controller_cfg);
+
+    mqtt_bridge_stop_client();
+    mqtt_status_set(s_cfg.enabled, false);
+
+    if (!s_cfg.enabled) {
+        ESP_LOGI(TAG, "disabled by config");
+        return ESP_OK;
+    }
+    if (s_cfg.host[0] == '\0') {
+        ESP_LOGW(TAG, "enabled but broker host is empty");
+        return ESP_OK;
+    }
+
+    snprintf(s_uri, sizeof s_uri, "%s://%s:%u",
+             s_cfg.use_tls ? "mqtts" : "mqtt",
+             s_cfg.host, (unsigned)s_cfg.port);
+    char base[96];
+    base_prefix(base, sizeof base);
+    snprintf(s_lwt_topic, sizeof s_lwt_topic, "%s/availability", base);
+
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = s_uri,
+        .credentials.username = s_cfg.username[0] ? s_cfg.username : NULL,
+        .credentials.client_id = s_cfg.client_id[0] ? s_cfg.client_id : NULL,
+        .credentials.authentication.password = s_cfg.password[0] ? s_cfg.password : NULL,
+        .session.keepalive = s_cfg.keepalive_sec ? s_cfg.keepalive_sec : 60,
+        .session.last_will.topic = s_lwt_topic,
+        .session.last_will.msg = "offline",
+        .session.last_will.msg_len = 7,
+        .session.last_will.qos = 1,
+        .session.last_will.retain = true,
+    };
+
+    s_client = esp_mqtt_client_init(&mqtt_cfg);
+    if (!s_client) {
+        mqtt_status_set(true, false);
+        return ESP_ERR_NO_MEM;
+    }
+    esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    esp_err_t err = esp_mqtt_client_start(s_client);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_mqtt_client_start failed: 0x%x", err);
+        esp_mqtt_client_destroy(s_client);
+        s_client = NULL;
+        mqtt_status_set(true, false);
+        return err;
+    }
+    mqtt_status_set(true, false);
+    ESP_LOGI(TAG, "started client uri=%s", s_uri);
+    return ESP_OK;
+}
+
+bool mqtt_bridge_is_connected(void)
+{
+    return s_connected;
+}
+
 esp_err_t mqtt_bridge_init(void)
 {
-    ESP_LOGI(TAG, "init");
-    return ESP_OK;
+    return mqtt_bridge_reconfigure();
 }
 #endif

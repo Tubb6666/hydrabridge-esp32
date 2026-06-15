@@ -100,12 +100,12 @@ static void test_get_by_serial(void)
 {
     light_registry_reset();
     registered_light_t l;
-    make_light(&l, "hydra-9Q9B", "9Q9B0BE6D2R1EB", 0x1C, 0xBC, 0xEC, 0x0B, 0xE6, 0xD2);
+    make_light(&l, "hydra-example", "HYDRA64EXMPL01", 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33);
     TEST_ASSERT_EQUAL_INT(0, light_registry_add(&l));
 
-    const registered_light_t *got = light_registry_get_by_serial("9Q9B0BE6D2R1EB");
+    const registered_light_t *got = light_registry_get_by_serial("HYDRA64EXMPL01");
     TEST_ASSERT_NOT_NULL(got);
-    TEST_ASSERT_EQUAL_STRING("hydra-9Q9B", got->light_id);
+    TEST_ASSERT_EQUAL_STRING("hydra-example", got->light_id);
 
     TEST_ASSERT_NULL(light_registry_get_by_serial("OTHER"));
     TEST_ASSERT_NULL(light_registry_get_by_serial(NULL));
@@ -115,7 +115,7 @@ static void test_get_by_addr(void)
 {
     light_registry_reset();
     registered_light_t l;
-    uint8_t addr[BLE_ADDR_BYTES] = {0x1C, 0xBC, 0xEC, 0x0B, 0xE6, 0xD2};
+    uint8_t addr[BLE_ADDR_BYTES] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33};
     make_light(&l, "addr-test", "S", addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
     TEST_ASSERT_EQUAL_INT(0, light_registry_add(&l));
 
@@ -126,6 +126,86 @@ static void test_get_by_addr(void)
     uint8_t other[BLE_ADDR_BYTES] = {0, 0, 0, 0, 0, 0};
     TEST_ASSERT_NULL(light_registry_get_by_addr(other));
     TEST_ASSERT_NULL(light_registry_get_by_addr(NULL));
+}
+
+static void test_ble_addr_nimble_conversion_roundtrip(void)
+{
+    uint8_t nimble[BLE_ADDR_BYTES] = {0x33, 0x22, 0x11, 0xCC, 0xBB, 0xAA};
+    uint8_t canonical[BLE_ADDR_BYTES] = {0};
+    uint8_t back[BLE_ADDR_BYTES] = {0};
+    uint8_t expected[BLE_ADDR_BYTES] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33};
+
+    hydra_ble_addr_from_nimble(canonical, nimble);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, canonical, BLE_ADDR_BYTES);
+
+    hydra_ble_addr_to_nimble(back, canonical);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(nimble, back, BLE_ADDR_BYTES);
+}
+
+static void test_ble_addr_parse_and_format(void)
+{
+    uint8_t addr[BLE_ADDR_BYTES] = {0};
+    uint8_t expected[BLE_ADDR_BYTES] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33};
+    char text[18];
+
+    TEST_ASSERT_EQUAL_INT(0, hydra_ble_addr_parse("AA:BB:CC:11:22:33", addr));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, addr, BLE_ADDR_BYTES);
+
+    TEST_ASSERT_EQUAL_INT(0, hydra_ble_addr_format(addr, text, sizeof text));
+    TEST_ASSERT_EQUAL_STRING("aa:bb:cc:11:22:33", text);
+
+    TEST_ASSERT_EQUAL_INT(-1, hydra_ble_addr_parse("1c:bc:ec:0b:e6", addr));
+    TEST_ASSERT_EQUAL_INT(-1, hydra_ble_addr_parse("1c:bc:ec:0b:e6:1ff", addr));
+}
+
+static void test_update_discovery_refreshes_peer(void)
+{
+    light_registry_reset();
+    registered_light_t l;
+    make_light(&l, "hydra-example", "HYDRA64EXMPL01", 0x33, 0x22, 0x11, 0xCC, 0xBB, 0xAA);
+    TEST_ASSERT_EQUAL_INT(0, light_registry_add(&l));
+
+    uint8_t corrected[BLE_ADDR_BYTES] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33};
+    TEST_ASSERT_EQUAL_INT(0, light_registry_update_discovery("hydra-example", corrected,
+                                                             BLE_ADDR_PUBLIC, -41));
+
+    const registered_light_t *got = light_registry_get("hydra-example");
+    TEST_ASSERT_NOT_NULL(got);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(corrected, got->ble_addr, BLE_ADDR_BYTES);
+    TEST_ASSERT_EQUAL_INT(BLE_ADDR_PUBLIC, got->ble_addr_type);
+    TEST_ASSERT_EQUAL_INT8(-41, got->last_seen_rssi);
+}
+
+static void test_rename_light_updates_display_name(void)
+{
+    light_registry_reset();
+    registered_light_t l;
+    make_light(&l, "rename", "S", 1,2,3,4,5,6);
+    TEST_ASSERT_EQUAL_INT(0, light_registry_add(&l));
+
+    TEST_ASSERT_EQUAL_INT(0, light_registry_rename("rename", "Reef Left"));
+    TEST_ASSERT_EQUAL_STRING("Reef Left", light_registry_get("rename")->display_name);
+}
+
+static void test_rename_trims_and_rejects_empty(void)
+{
+    light_registry_reset();
+    registered_light_t l;
+    make_light(&l, "rename", "S", 1,2,3,4,5,6);
+    TEST_ASSERT_EQUAL_INT(0, light_registry_add(&l));
+
+    TEST_ASSERT_EQUAL_INT(0, light_registry_rename("rename", "  Reef Right  "));
+    TEST_ASSERT_EQUAL_STRING("Reef Right", light_registry_get("rename")->display_name);
+    TEST_ASSERT_EQUAL_INT(-1, light_registry_rename("rename", "   "));
+    TEST_ASSERT_EQUAL_STRING("Reef Right", light_registry_get("rename")->display_name);
+}
+
+static void test_rename_missing_light_fails(void)
+{
+    light_registry_reset();
+    TEST_ASSERT_EQUAL_INT(-1, light_registry_rename("missing", "Name"));
+    TEST_ASSERT_EQUAL_INT(-1, light_registry_rename(NULL, "Name"));
+    TEST_ASSERT_EQUAL_INT(-1, light_registry_rename("missing", NULL));
 }
 
 static void test_iterate(void)
@@ -229,6 +309,12 @@ void register_light_registry_tests(void)
     RUN_TEST(test_remove_not_found);
     RUN_TEST(test_get_by_serial);
     RUN_TEST(test_get_by_addr);
+    RUN_TEST(test_ble_addr_nimble_conversion_roundtrip);
+    RUN_TEST(test_ble_addr_parse_and_format);
+    RUN_TEST(test_update_discovery_refreshes_peer);
+    RUN_TEST(test_rename_light_updates_display_name);
+    RUN_TEST(test_rename_trims_and_rejects_empty);
+    RUN_TEST(test_rename_missing_light_fails);
     RUN_TEST(test_iterate);
     RUN_TEST(test_mutators);
     RUN_TEST(test_group_add_remove);

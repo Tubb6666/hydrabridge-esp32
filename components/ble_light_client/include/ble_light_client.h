@@ -11,11 +11,14 @@
 typedef enum {
     BLC_STATE_DISABLED        = 0,
     BLC_STATE_IDLE            = 1,
-    BLC_STATE_SCANNING        = 2,
+    /* BLC_STATE_SCANNING (was 2) and BLC_STATE_VERIFYING (was 6) removed in
+     * STEP 0 cleanup: dead values, never assigned, never tested, never
+     * returned by current_state(), never appeared in logs or state machines.
+     * Subsequent values explicitly numbered to preserve prior numeric IDs
+     * for live states (so "state %d" logs and any observers are unchanged). */
     BLC_STATE_CONNECTING      = 3,
     BLC_STATE_DISCOVERING     = 4,
     BLC_STATE_SUBSCRIBING     = 5,
-    BLC_STATE_VERIFYING       = 6,
     BLC_STATE_READY           = 7,
     BLC_STATE_WRITING         = 8,
     BLC_STATE_WAITING_CONFIRM = 9,
@@ -41,6 +44,7 @@ esp_err_t ble_light_client_init(void);
 esp_err_t ble_light_client_start(void);
 void ble_light_client_set_result_cb(blc_result_cb_t cb, void *user);
 blc_state_t ble_light_client_current_state(void);
+void try_connect_to(const registered_light_t *light, bool do_prime);
 #endif
 
 #endif /* HYDRA_BLE_LIGHT_CLIENT_H */

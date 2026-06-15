@@ -1,8 +1,9 @@
 # ESP32 Hydra 64HD Controller — OTA partition layout
-# 4 MB flash. Two app slots for safe OTA + rollback. No factory slot to maximize app space.
+# 16 MB flash (Waveshare Industrial ESP32-S3 target). Two large app slots
+# (~8MB each) for safe OTA + rollback. No factory slot to maximize app space.
 # Name,     Type, SubType, Offset,   Size,     Flags
 nvs,        data, nvs,     0x9000,   0x6000,
 otadata,    data, ota,     0xf000,   0x2000,
 phy_init,   data, phy,     0x11000,  0x1000,
-ota_0,      app,  ota_0,   0x20000,  0x1E0000,
-ota_1,      app,  ota_1,   0x200000, 0x1E0000,
+ota_0,      app,  ota_0,   0x20000,  0x7E0000,
+ota_1,      app,  ota_1,   0x800000, 0x800000,
